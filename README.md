@@ -5,7 +5,8 @@ This project showcases a CI/CD pipeline designed to automate the full lifecycle 
 ## Authentication Showcase
 Watch the video below to see how the authentication process works in the Spring Boot application integrated with MySQL.
 
-![Spring Boot MySQL Authentication](https://gitlab.com/razielsa/springboot-mysql-ci-cd-pipeline/-/wikis/uploads/28e1f9195d5d8673592ffd95a92e32f1/MySQL-Authentication-Demo.mp4){width=700px}
+https://github.com/user-attachments/assets/cb2f6147-7b04-47d4-b7fa-db16e2c0873d
+
 
 ## Pipeline Overview
 The pipeline automates various stages to facilitate continuous integration and delivery:
