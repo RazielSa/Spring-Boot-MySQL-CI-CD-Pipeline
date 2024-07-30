@@ -1,0 +1,119 @@
+stages:
+  - compile
+  - test
+  - package
+  - nexus_artifact
+  - deploy
+  - argocd_kubernetes_manifest
+
+variables:
+  SONAR_URL: "http://10.0.0.13:9000"
+  DOCKER_IMAGE: "raziels/spring-mysql-cicd:${CI_COMMIT_SHORT_SHA}"
+  MAVEN_CLI_OPTS: "-s settings.xml --batch-mode --errors --fail-at-end"
+
+cache:
+  key: "${CI_COMMIT_REF_SLUG}"
+  paths:
+    - .m2/repository/
+    - target/
+
+compile:
+  stage: compile
+  tags:
+    - "raziel-ubuntu"
+  image: maven:3.8.4-openjdk-17-slim
+  script:
+    - echo "Compiling Maven project..."
+    - mkdir -p .m2/repository
+    - mvn $MAVEN_CLI_OPTS compile
+
+test:
+  stage: test
+  tags:
+    - "raziel-ubuntu"
+  image: maven:3.8.4-openjdk-17-slim
+  script:
+    - echo "Running tests..."
+    - mkdir -p .m2/repository
+    - mvn $MAVEN_CLI_OPTS test
+  dependencies:
+    - compile
+
+sonarqube:
+  stage: test
+  tags:
+    - "raziel-ubuntu"
+  image: maven:3.8.4-openjdk-17-slim
+  script:
+    - echo "Running SonarQube Analysis..."
+    - mkdir -p .m2/repository
+    - mvn $MAVEN_CLI_OPTS sonar:sonar -Dsonar.login=$SONAR_AUTH_TOKEN -Dsonar.host.url=${SONAR_URL} -Dsonar.projectKey=com.raziel:java-mysql-cicd -Dsonar.projectName="MySQL CI/CD Project" -Dsonar.java.binaries=target/classes -f pom.xml
+  dependencies:
+    - compile
+    - test
+
+package:
+  stage: package
+  tags:
+    - "raziel-ubuntu"
+  image: maven:3.8.4-openjdk-17-slim
+  script:
+    - echo "Packaging Maven project..."
+    - mkdir -p .m2/repository
+    - mvn $MAVEN_CLI_OPTS package
+  artifacts:
+    paths:
+      - target/spring-mysql-cicd-1.0.0-SNAPSHOT.jar
+  dependencies:
+    - compile
+    - test
+    - sonarqube
+
+nexus_artifact:
+  stage: nexus_artifact
+  tags:
+    - "raziel-ubuntu"
+  script:
+    - echo "Uploading to Nexus Artifact Repository..."
+    - mkdir -p .m2/repository
+    - mvn $MAVEN_CLI_OPTS deploy -Dmaven.test.skip=true
+  dependencies:
+    - package
+
+deploy:
+  stage: deploy
+  tags:
+    - "raziel-ubuntu"
+  script:
+    - echo "Uploading application to Docker Hub..."
+    - docker login -u "$DOCKER_USERNAME" -p "$DOCKER_PASSWORD"
+    - docker build -t $DOCKER_IMAGE .
+    - docker push $DOCKER_IMAGE
+  dependencies:
+    - package
+
+argocd_kubernetes_manifest:
+  stage: argocd_kubernetes_manifest
+  image: docker:20.10.12
+  services:
+    - docker:20.10.12-dind
+  before_script:
+    - apk add --no-cache openssh git
+    - mkdir -p ~/.ssh
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H gitlab.com >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+  script:
+    - eval $(ssh-agent -s)
+    - ssh-add ~/.ssh/id_rsa
+    - git config --global user.email "razupx@gmail.com"
+    - git config --global user.name "Raziel Sakira"
+    - git clone git@gitlab.com:razielsa/manifests-projects.git /tmp/manifests-projects
+    - cd /tmp/manifests-projects
+    - sed -i "s/spring-mysql-cicd:.*/spring-mysql-cicd:${CI_COMMIT_SHORT_SHA}/g" spring-mysql-cicd-manifest/deployment.yml
+    - git add spring-mysql-cicd-manifest/deployment.yml
+    - git commit -am "Update Image version for Spring MySQL Project to ${CI_COMMIT_SHORT_SHA}"
+    - git push
+  dependencies:
+    - package
